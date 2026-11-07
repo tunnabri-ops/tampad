@@ -1,5 +1,6 @@
 import os
 import re
+import time
 import requests
 
 from fastapi import FastAPI, HTTPException, Response
@@ -7,9 +8,9 @@ from fastapi.responses import PlainTextResponse, JSONResponse
 from fastapi.requests import Request
 
 app = FastAPI(
-    title="Universal M3U API with Proxy",
-    description="M3U Playlist API and Proxy Stream for your own player",
-    version="2.1.0"
+    title="Universal M3U API with Proxy & Smart Cache",
+    description="M3U Playlist API and Proxy Stream for Tapmad",
+    version="2.3.0"
 )
 
 SOURCE_URL = (
@@ -25,33 +26,48 @@ HEADERS = {
 
 TIMEOUT = 25
 
+# ক্যাশ মেমোরি কনফিগারেশন (১ মিনিট পর পর সোর্স থেকে ফ্রেশ ডেটা সিঙ্ক করবে)
+CACHE_DURATION = 60
+cache = {
+    "content": None,
+    "timestamp": 0
+}
 
-def fetch_playlist():
-    try:
-        response = requests.get(
-            SOURCE_URL,
-            headers=HEADERS,
-            timeout=TIMEOUT
-        )
-        response.raise_for_status()
-        content = response.text.strip()
 
-        if not content.startswith("#EXTM3U"):
-            raise ValueError("Invalid M3U response")
+def fetch_playlist(force_refresh=False):
+    global cache
+    current_time = time.time()
 
-        return content
+    if force_refresh or not cache["content"] or (current_time - cache["timestamp"] > CACHE_DURATION):
+        try:
+            response = requests.get(
+                SOURCE_URL,
+                headers=HEADERS,
+                timeout=TIMEOUT
+            )
+            response.raise_for_status()
+            content = response.text.strip()
 
-    except requests.RequestException as error:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Source request failed: {error}"
-        )
+            if not content.startswith("#EXTM3U"):
+                raise ValueError("Invalid M3U response")
 
-    except ValueError as error:
-        raise HTTPException(
-            status_code=502,
-            detail=str(error)
-        )
+            cache["content"] = content
+            cache["timestamp"] = current_time
+
+        except requests.RequestException as error:
+            if not cache["content"]:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Source request failed: {error}"
+                )
+        except ValueError as error:
+            if not cache["content"]:
+                raise HTTPException(
+                    status_code=502,
+                    detail=str(error)
+                )
+
+    return cache["content"]
 
 
 def parse_playlist(content, base_url=""):
@@ -77,7 +93,6 @@ def parse_playlist(content, base_url=""):
 
         elif current and not line.startswith("#"):
             original_url = line
-            # স্ট্রিম লিংকগুলোকে আমাদের প্রক্সি রুটের মাধ্যমে রি-রাইট করা হচ্ছে
             if base_url:
                 proxied_url = f"{base_url}/proxy?url={requests.utils.quote(original_url, safe='')}"
                 current["url"] = proxied_url
@@ -96,11 +111,12 @@ def home(request: Request):
         "success": True,
         "status": "online",
         "service": "Universal M3U API with Proxy",
-        "version": "2.1.0",
+        "version": "2.3.0",
         "endpoints": {
             "playlist": "/playlist.m3u",
             "channels": "/api/channels",
             "proxy": "/proxy?url=STREAM_URL",
+            "refresh": "/api/refresh",
             "health": "/api/health",
             "docs": "/docs"
         }
@@ -120,7 +136,6 @@ def get_playlist(request: Request):
     base_url = str(request.base_url).rstrip("/")
     content = fetch_playlist()
     
-    # অরিজিনাল মিউথ্রিউ লাইনের লিংকগুলোকে প্রক্সি লিংকে রূপান্তর করা
     lines = content.splitlines()
     new_lines = []
     
@@ -147,7 +162,7 @@ def get_playlist(request: Request):
 @app.get("/proxy")
 def proxy_stream(url: str):
     """
-    ট্যাপমাড বা অন্যান্য সিডিএন লিংক বাইপাস করার জন্য প্রক্সি স্ট্রিম রাউট
+    ট্যাপমাড বা অন্যান্য সিডিএন লিংক বাইপাস করার প্রক্সি রাউট
     """
     try:
         req = requests.get(url, headers=HEADERS, stream=True, timeout=TIMEOUT)
@@ -157,7 +172,6 @@ def proxy_stream(url: str):
                 if chunk:
                     yield chunk
 
-        # রেসপন্স হেডার ও কনটেন্ট টাইপ ঠিক রাখা
         content_type = req.headers.get("content-type", "video/mp2t")
         
         return Response(
@@ -184,12 +198,12 @@ def get_channels(request: Request):
 
 @app.get("/api/refresh")
 def refresh_playlist():
-    content = fetch_playlist()
+    content = fetch_playlist(force_refresh=True)
     channels = parse_playlist(content)
 
     return {
-        "success": True,
-        "message": "Playlist fetched successfully",
+        "success": "True",
+        "message": "Playlist forcefully refreshed",
         "total": len(channels)
     }
 
