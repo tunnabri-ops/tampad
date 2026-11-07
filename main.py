@@ -1,12 +1,14 @@
 
-import requests
 import re
+import requests
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import PlainTextResponse, JSONResponse
 
 app = FastAPI(
-    title="Tapmad M3U API",
-    version="1.0.0"
+    title="Universal M3U API",
+    description="M3U Playlist API for your own player",
+    version="2.0.0"
 )
 
 SOURCE_URL = (
@@ -16,56 +18,84 @@ SOURCE_URL = (
 )
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0"
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "*/*"
 }
+
+TIMEOUT = 25
+
 
 def fetch_playlist():
     try:
         response = requests.get(
             SOURCE_URL,
             headers=HEADERS,
-            timeout=30
+            timeout=TIMEOUT
         )
+
         response.raise_for_status()
 
-        content = response.text
+        content = response.text.strip()
 
-        if not content.lstrip().startswith("#EXTM3U"):
-            raise ValueError("Invalid M3U playlist")
+        if not content.startswith("#EXTM3U"):
+            raise ValueError("Invalid M3U response")
 
         return content
 
     except requests.RequestException as error:
         raise HTTPException(
             status_code=502,
-            detail=f"Source unavailable: {error}"
+            detail=f"Source request failed: {error}"
+        )
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=502,
+            detail=str(error)
         )
 
 
 def parse_playlist(content):
     channels = []
-    current = {}
+    current = None
 
     for line in content.splitlines():
         line = line.strip()
 
-        if line.startswith("#EXTINF"):
-            name = line.split(",")[-1].strip()
+        if not line:
+            continue
 
-            logo = re.search(r'tvg-logo="([^"]*)"', line)
-            group = re.search(r'group-title="([^"]*)"', line)
+        if line.startswith("#EXTINF"):
+            name_match = re.search(r",([^,]*)$", line)
+
+            logo_match = re.search(
+                r'tvg-logo="([^"]*)"', line
+            )
+
+            group_match = re.search(
+                r'group-title="([^"]*)"', line
+            )
 
             current = {
-                "name": name,
-                "logo": logo.group(1) if logo else "",
-                "group": group.group(1) if group else "Other"
+                "name": (
+                    name_match.group(1).strip()
+                    if name_match else "Unknown"
+                ),
+                "logo": (
+                    logo_match.group(1)
+                    if logo_match else ""
+                ),
+                "group": (
+                    group_match.group(1)
+                    if group_match else "Other"
+                )
             }
 
-        elif line.startswith(("http://", "https://")):
-            if current:
-                current["url"] = line
-                channels.append(current)
-                current = {}
+        elif current and not line.startswith("#"):
+            current["url"] = line
+
+            channels.append(current)
+            current = None
 
     return channels
 
@@ -73,26 +103,40 @@ def parse_playlist(content):
 @app.get("/")
 def home():
     return {
+        "success": True,
         "status": "online",
-        "service": "Tapmad M3U API",
-        "version": "1.0.0",
-        "endpoints": [
-            "/playlist.m3u",
-            "/api/channels",
-            "/api/health",
-            "/docs"
-        ]
+        "service": "Universal M3U API",
+        "version": "2.0.0",
+        "endpoints": {
+            "playlist": "/playlist.m3u",
+            "channels": "/api/channels",
+            "health": "/api/health",
+            "refresh": "/api/refresh",
+            "docs": "/docs"
+        }
+    }
+
+
+@app.get("/api/health")
+def health():
+    return {
+        "success": True,
+        "status": "healthy"
     }
 
 
 @app.get("/playlist.m3u")
-def get_m3u():
+def get_playlist():
     content = fetch_playlist()
 
     return PlainTextResponse(
         content,
         media_type="audio/x-mpegurl",
-        headers={"Cache-Control": "no-cache"}
+        headers={
+            "Content-Disposition":
+                'inline; filename="playlist.m3u"',
+            "Cache-Control": "no-store"
+        }
     )
 
 
@@ -108,18 +152,26 @@ def get_channels():
     })
 
 
-@app.get("/api/health")
-def health():
-    return {"status": "healthy"}
-
-
 @app.get("/api/refresh")
-def refresh():
+def refresh_playlist():
     content = fetch_playlist()
     channels = parse_playlist(content)
 
     return {
         "success": True,
-        "message": "Playlist refreshed",
+        "message": "Playlist fetched successfully",
         "total": len(channels)
+    }
+
+
+@app.get("/api/info")
+def playlist_info():
+    content = fetch_playlist()
+    channels = parse_playlist(content)
+
+    return {
+        "name": "Tapmad Playlist",
+        "format": "M3U",
+        "total_channels": len(channels),
+        "source": "GitHub"
     }
