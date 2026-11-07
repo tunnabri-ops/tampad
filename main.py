@@ -1,3 +1,4 @@
+import os
 import re
 import requests
 
@@ -178,4 +179,6 @@ def playlist_info():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=False)
+    # প্যানেল থেকে বরাদ্দকৃত পোর্ট স্বয়ংক্রিয়ভাবে নেওয়ার ব্যবস্থা করা হয়েছে
+    port = int(os.environ.get("SERVER_PORT", 8080))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
