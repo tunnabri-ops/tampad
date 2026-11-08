@@ -8,25 +8,27 @@ from fastapi.responses import PlainTextResponse, JSONResponse
 from fastapi.requests import Request
 
 app = FastAPI(
-    title="Universal M3U API with Proxy & Smart Cache",
-    description="M3U Playlist API and Proxy Stream for Tapmad",
-    version="2.3.0"
+    title="SonyLIV M3U API with Smart Proxy & Cache",
+    description="M3U Playlist API and Proxy Stream for SonyLIV",
+    version="1.0.0"
 )
 
 SOURCE_URL = (
     "https://raw.githubusercontent.com/"
-    "sm-monirulislam/Tapmad_Auto_Update_Playlist/"
-    "refs/heads/main/tapmad_sm.m3u"
+    "srhady/SonyLiv/refs/heads/main/sonyliv_playlist.m3u"
 )
 
+# SonyLIV-এর জন্য নির্দিষ্ট হেডার (রেফারার ও অরিজিন সহ)
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Referer": "https://www.sonyliv.com/",
+    "Origin": "https://www.sonyliv.com",
     "Accept": "*/*"
 }
 
 TIMEOUT = 25
 
-# ক্যাশ মেমোরি কনফিগারেশন (১ মিনিট পর পর সোর্স থেকে ফ্রেশ ডেটা সিঙ্ক করবে)
+# ১ মিনিটের স্মার্ট ক্যাশ মেমোরি
 CACHE_DURATION = 60
 cache = {
     "content": None,
@@ -110,8 +112,8 @@ def home(request: Request):
     return {
         "success": True,
         "status": "online",
-        "service": "Universal M3U API with Proxy",
-        "version": "2.3.0",
+        "service": "SonyLIV M3U API with Proxy",
+        "version": "1.0.0",
         "endpoints": {
             "playlist": "/playlist.m3u",
             "channels": "/api/channels",
@@ -153,7 +155,7 @@ def get_playlist(request: Request):
         modified_content,
         media_type="audio/x-mpegurl",
         headers={
-            "Content-Disposition": 'inline; filename="playlist.m3u"',
+            "Content-Disposition": 'inline; filename="sonyliv_playlist.m3u"',
             "Cache-Control": "no-store"
         }
     )
@@ -162,10 +164,10 @@ def get_playlist(request: Request):
 @app.get("/proxy")
 def proxy_stream(url: str):
     """
-    ট্যাপমাড বা অন্যান্য সিডিএন লিংক বাইপাস করার প্রক্সি রাউট
+    SonyLIV সিডিএন টোকেন এবং জিও-রেস্ট্রিকশন বাইপাস করার প্রক্সি রাউট
     """
     try:
-        req = requests.get(url, headers=HEADERS, stream=True, timeout=TIMEOUT)
+        req = requests.get(url, headers=HEADERS, stream=True, timeout=TIMEOUT, allow_redirects=True)
         
         def generate():
             for chunk in req.iter_content(chunk_size=8192):
@@ -202,8 +204,8 @@ def refresh_playlist():
     channels = parse_playlist(content)
 
     return {
-        "success": "True",
-        "message": "Playlist forcefully refreshed",
+        "success": True,
+        "message": "Playlist cache forcefully refreshed",
         "total": len(channels)
     }
 
