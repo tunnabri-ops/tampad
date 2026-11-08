@@ -8,9 +8,9 @@ from fastapi.responses import PlainTextResponse, JSONResponse, StreamingResponse
 from fastapi.requests import Request
 
 app = FastAPI(
-    title="Tapmad M3U API with Stable Proxy",
-    description="M3U Playlist API and Streaming Proxy for Tapmad",
-    version="3.1.0"
+    title="Tapmad M3U API with 403 Bypass Proxy",
+    description="M3U Playlist API and Advanced Proxy Stream for Tapmad",
+    version="3.2.0"
 )
 
 SOURCE_URL = (
@@ -20,7 +20,7 @@ SOURCE_URL = (
 )
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     "Referer": "https://www.tapmad.com/",
     "Origin": "https://www.tapmad.com",
     "Accept": "*/*"
@@ -28,7 +28,7 @@ HEADERS = {
 
 TIMEOUT = 25
 
-# ১ মিনিটের স্মার্ট ক্যাশ
+# ১ মিনিটের স্মার্ট ক্যাশ মেমোরি
 CACHE_DURATION = 60
 cache = {
     "content": None,
@@ -112,8 +112,8 @@ def home(request: Request):
     return {
         "success": True,
         "status": "online",
-        "service": "Tapmad M3U API",
-        "version": "3.1.0",
+        "service": "Tapmad M3U API with 403 Bypass",
+        "version": "3.2.0",
         "endpoints": {
             "playlist": "/playlist.m3u",
             "channels": "/api/channels",
@@ -164,10 +164,18 @@ def get_playlist(request: Request):
 @app.get("/proxy")
 def proxy_stream(url: str):
     """
-    StreamingResponse ব্যবহার করে নিরাপদ ও ক্র্যাশ-ফ্রি প্রক্সি রাউট
+    403 Forbidden বাইপাস করার জন্য আপডেট করা স্ট্রিমিং প্রক্সি রাউট
     """
     try:
-        req = requests.get(url, headers=HEADERS, stream=True, timeout=TIMEOUT, allow_redirects=True)
+        proxy_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Referer": "https://www.tapmad.com/",
+            "Origin": "https://www.tapmad.com",
+            "Accept": "*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        
+        req = requests.get(url, headers=proxy_headers, stream=True, timeout=TIMEOUT, allow_redirects=True)
         
         def generate():
             for chunk in req.iter_content(chunk_size=8192):
