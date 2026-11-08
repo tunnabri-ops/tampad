@@ -3,31 +3,33 @@ import re
 import time
 import requests
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import PlainTextResponse, JSONResponse
 from fastapi.requests import Request
 
 app = FastAPI(
-    title="SonyLIV Direct M3U API",
-    description="M3U Playlist API with Direct Source Links (No Proxy)",
-    version="2.0.0"
+    title="Tapmad M3U API with Proxy",
+    description="M3U Playlist API and Stream Proxy for Tapmad",
+    version="3.0.0"
 )
 
 SOURCE_URL = (
     "https://raw.githubusercontent.com/"
-    "srhady/SonyLiv/refs/heads/main/sonyliv_playlist.m3u"
+    "sm-monirulislam/Tapmad_Auto_Update_Playlist/"
+    "refs/heads/main/tapmad_sm.m3u"
 )
 
+# Tapmad-এর জন্য সঠিক ব্রাউজার হেডার
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Referer": "https://www.sonyliv.com/",
-    "Origin": "https://www.sonyliv.com",
+    "Referer": "https://www.tapmad.com/",
+    "Origin": "https://www.tapmad.com",
     "Accept": "*/*"
 }
 
 TIMEOUT = 25
 
-# ১ মিনিটের স্মার্ট ক্যাশ (রিয়েল-টাইম ফ্রেশ লিংক ফেচ করার জন্য)
+# ১ মিনিটের স্মার্ট ক্যাশ (ঘন ঘন লিংক চেঞ্জ হ্যান্ডেল করার জন্য)
 CACHE_DURATION = 60
 cache = {
     "content": None,
@@ -71,7 +73,7 @@ def fetch_playlist(force_refresh=False):
     return cache["content"]
 
 
-def parse_playlist(content):
+def parse_playlist(content, base_url=""):
     channels = []
     current = None
 
@@ -93,8 +95,13 @@ def parse_playlist(content):
             }
 
         elif current and not line.startswith("#"):
-            # সরাসরি অরিজিনাল সোর্স লিংক বসবে, কোনো প্রক্সি থাকবে না
-            current["url"] = line
+            original_url = line
+            if base_url:
+                proxied_url = f"{base_url}/proxy?url={requests.utils.quote(original_url, safe='')}"
+                current["url"] = proxied_url
+            else:
+                current["url"] = original_url
+
             channels.append(current)
             current = None
 
@@ -106,11 +113,12 @@ def home(request: Request):
     return {
         "success": True,
         "status": "online",
-        "service": "SonyLIV Direct M3U API",
-        "version": "2.0.0",
+        "service": "Tapmad M3U API",
+        "version": "3.0.0",
         "endpoints": {
             "playlist": "/playlist.m3u",
             "channels": "/api/channels",
+            "proxy": "/proxy?url=STREAM_URL",
             "refresh": "/api/refresh",
             "health": "/api/health",
             "docs": "/docs"
@@ -128,23 +136,61 @@ def health():
 
 @app.get("/playlist.m3u")
 def get_playlist(request: Request):
-    # প্রক্সি ছাড়া সরাসরি গিটহাবের রিয়েল-টাইম M3U কন্টেন্ট রিটার্ন করবে
+    base_url = str(request.base_url).rstrip("/")
     content = fetch_playlist()
+    
+    lines = content.splitlines()
+    new_lines = []
+    
+    for line in lines:
+        line_str = line.strip()
+        if line_str and not line_str.startswith("#"):
+            proxied_url = f"{base_url}/proxy?url={requests.utils.quote(line_str, safe='')}"
+            new_lines.append(proxied_url)
+        else:
+            new_lines.append(line_str)
+            
+    modified_content = "\n".join(new_lines)
 
     return PlainTextResponse(
-        content,
+        modified_content,
         media_type="audio/x-mpegurl",
         headers={
-            "Content-Disposition": 'inline; filename="sonyliv_playlist.m3u"',
+            "Content-Disposition": 'inline; filename="tapmad_sm.m3u"',
             "Cache-Control": "no-store"
         }
     )
 
 
+@app.get("/proxy")
+def proxy_stream(url: str):
+    """
+    ট্যাপমাড সিডিএন বাইপাস করার জন্য নিরাপদ প্রক্সি রাউট
+    """
+    try:
+        req = requests.get(url, headers=HEADERS, stream=True, timeout=TIMEOUT, allow_redirects=True)
+        
+        def generate():
+            for chunk in req.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
+
+        content_type = req.headers.get("content-type", "video/mp2t")
+        
+        return Response(
+            generate(),
+            status_code=req.status_code,
+            media_type=content_type if content_type else "video/mp2t"
+        )
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Proxy failed: {e}")
+
+
 @app.get("/api/channels")
 def get_channels(request: Request):
+    base_url = str(request.base_url).rstrip("/")
     content = fetch_playlist()
-    channels = parse_playlist(content)
+    channels = parse_playlist(content, base_url)
 
     return JSONResponse({
         "success": True,
@@ -160,7 +206,7 @@ def refresh_playlist():
 
     return {
         "success": True,
-        "message": "Playlist cache forcefully refreshed",
+        "message": "Tapmad playlist cache forcefully refreshed",
         "total": len(channels)
     }
 
