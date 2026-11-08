@@ -2,15 +2,16 @@ import os
 import re
 import time
 import requests
+from urllib.parse import urljoin
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import PlainTextResponse, JSONResponse
 from fastapi.requests import Request
 
 app = FastAPI(
-    title="SonyLIV M3U API with Smart Proxy & Cache",
-    description="M3U Playlist API and Proxy Stream for SonyLIV",
-    version="1.0.0"
+    title="SonyLIV M3U API with Advanced HLS Proxy",
+    description="M3U Playlist API and Recursive HLS Proxy Stream for SonyLIV",
+    version="1.1.0"
 )
 
 SOURCE_URL = (
@@ -18,7 +19,7 @@ SOURCE_URL = (
     "srhady/SonyLiv/refs/heads/main/sonyliv_playlist.m3u"
 )
 
-# SonyLIV-এর জন্য নির্দিষ্ট হেডার (রেফারার ও অরিজিন সহ)
+# SonyLIV-এর সঠিক রিকোয়েস্ট হেডার
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer": "https://www.sonyliv.com/",
@@ -112,8 +113,8 @@ def home(request: Request):
     return {
         "success": True,
         "status": "online",
-        "service": "SonyLIV M3U API with Proxy",
-        "version": "1.0.0",
+        "service": "SonyLIV M3U API with Advanced HLS Proxy",
+        "version": "1.1.0",
         "endpoints": {
             "playlist": "/playlist.m3u",
             "channels": "/api/channels",
@@ -162,25 +163,51 @@ def get_playlist(request: Request):
 
 
 @app.get("/proxy")
-def proxy_stream(url: str):
+def proxy_stream(request: Request, url: str):
     """
-    SonyLIV সিডিএন টোকেন এবং জিও-রেস্ট্রিকশন বাইপাস করার প্রক্সি রাউট
+    SonyLIV মাস্টার প্লেলিস্ট, সাব-প্লেলিস্ট এবং ভিডিও চংক বাইপাস করার স্মার্ট প্রক্সি রাউট
     """
     try:
         req = requests.get(url, headers=HEADERS, stream=True, timeout=TIMEOUT, allow_redirects=True)
+        content_type = req.headers.get("content-type", "")
         
+        # যদি রেসপন্সটি m3u8 ফাইল বা সাব-প্লেলিস্ট হয়, তবে ভেতরের লিংকগুলো রি-রাইট করা
+        if "application/vnd.apple.mpegurl" in content_type or "text/plain" in content_type or url.endswith(".m3u8"):
+            playlist_content = req.text
+            base_url = str(request.base_url).rstrip("/")
+            base_url_proxy = f"{base_url}/proxy?url="
+            
+            modified_playlist = []
+            for line in playlist_content.splitlines():
+                line_str = line.strip()
+                if line_str and not line_str.startswith("#"):
+                    if line_str.startswith("http"):
+                        sub_url = line_str
+                    else:
+                        sub_url = urljoin(url, line_str)
+                    
+                    proxied_sub_url = f"{base_url_proxy}{requests.utils.quote(sub_url, safe='')}"
+                    modified_playlist.append(proxied_sub_url)
+                else:
+                    modified_playlist.append(line_str)
+                    
+            return PlainTextResponse(
+                "\n".join(modified_playlist),
+                media_type="application/vnd.apple.mpegurl"
+            )
+
+        # সরাসরি ভিডিও বা টিএস (TS) চংক ফাইল হলে স্ট্রিম পাস করা
         def generate():
             for chunk in req.iter_content(chunk_size=8192):
                 if chunk:
                     yield chunk
-
-        content_type = req.headers.get("content-type", "video/mp2t")
         
         return Response(
             generate(),
             status_code=req.status_code,
-            media_type=content_type
+            media_type=content_type if content_type else "video/mp2t"
         )
+        
     except requests.RequestException as e:
         raise HTTPException(status_code=502, detail=f"Proxy failed: {e}")
 
