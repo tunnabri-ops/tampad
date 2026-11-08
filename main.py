@@ -3,14 +3,14 @@ import re
 import time
 import requests
 
-from fastapi import FastAPI, HTTPException, Response
-from fastapi.responses import PlainTextResponse, JSONResponse
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import PlainTextResponse, JSONResponse, StreamingResponse
 from fastapi.requests import Request
 
 app = FastAPI(
-    title="Tapmad M3U API with Proxy",
-    description="M3U Playlist API and Stream Proxy for Tapmad",
-    version="3.0.0"
+    title="Tapmad M3U API with Stable Proxy",
+    description="M3U Playlist API and Streaming Proxy for Tapmad",
+    version="3.1.0"
 )
 
 SOURCE_URL = (
@@ -19,7 +19,6 @@ SOURCE_URL = (
     "refs/heads/main/tapmad_sm.m3u"
 )
 
-# Tapmad-এর জন্য সঠিক ব্রাউজার হেডার
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer": "https://www.tapmad.com/",
@@ -29,7 +28,7 @@ HEADERS = {
 
 TIMEOUT = 25
 
-# ১ মিনিটের স্মার্ট ক্যাশ (ঘন ঘন লিংক চেঞ্জ হ্যান্ডেল করার জন্য)
+# ১ মিনিটের স্মার্ট ক্যাশ
 CACHE_DURATION = 60
 cache = {
     "content": None,
@@ -114,7 +113,7 @@ def home(request: Request):
         "success": True,
         "status": "online",
         "service": "Tapmad M3U API",
-        "version": "3.0.0",
+        "version": "3.1.0",
         "endpoints": {
             "playlist": "/playlist.m3u",
             "channels": "/api/channels",
@@ -165,7 +164,7 @@ def get_playlist(request: Request):
 @app.get("/proxy")
 def proxy_stream(url: str):
     """
-    ট্যাপমাড সিডিএন বাইপাস করার জন্য নিরাপদ প্রক্সি রাউট
+    StreamingResponse ব্যবহার করে নিরাপদ ও ক্র্যাশ-ফ্রি প্রক্সি রাউট
     """
     try:
         req = requests.get(url, headers=HEADERS, stream=True, timeout=TIMEOUT, allow_redirects=True)
@@ -177,7 +176,7 @@ def proxy_stream(url: str):
 
         content_type = req.headers.get("content-type", "video/mp2t")
         
-        return Response(
+        return StreamingResponse(
             generate(),
             status_code=req.status_code,
             media_type=content_type if content_type else "video/mp2t"
